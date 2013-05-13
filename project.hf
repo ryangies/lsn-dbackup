@@ -1,0 +1,11 @@
+# HashFile 2.1
+name => lsn-dbackup
+builder => run
+src_dir => ./src
+abstract => Disk-based Backup
+license => lgpl
+version => @{
+  0
+  0
+  18
+}

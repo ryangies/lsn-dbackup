@@ -1,0 +1,166 @@
+#!/bin/bash
+
+_FIND=/usr/bin/find
+_LS=/bin/ls
+_PERL=/usr/bin/perl
+_RSYNC=/usr/bin/rsync
+_RSYNC_OPTS_STANDARD='--archive --numeric-ids --hard-links --safe-links'
+_RSYNC_OPTS_RESUME='--delete-during --delete-excluded --ignore-existing'
+
+function say () {
+  if ($opt_interactive); then
+    echo "$*"
+  fi
+}
+
+function ask_yn () {
+  local yn=false;
+  if ($opt_interactive); then
+    prompt="$1 [n] "
+    while true; do
+      read -p "$prompt" chr
+      case $chr in
+        [Yy]* ) yn=true; break;;
+        * ) yn=false; break;;
+      esac
+    done
+  else
+    yn=true
+  fi
+  if ($yn); then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function path_normalize () {
+  path=$1
+  path=${path//\/\//\/}
+  path=${path%/}
+  echo $path
+}
+
+function path_join () {
+  xIFS=$IFS
+  IFS='/'
+  path="$*"
+  IFS=$xIFS
+  echo $(path_normalize $path)
+}
+
+function dir_absolute () {
+  path=
+  if [ -d "$1" ]; then
+    cd $1
+    path=$(pwd)
+  fi
+  echo $path
+}
+
+function bak_get_subdir () {
+  xIFS=$IFS
+  IFS='@:'
+  parts=($1);
+  IFS=$xIFS
+  case ${#parts[*]} in
+    1) domain=$(hostname); path=${parts[0]} ;;
+    2) domain=${parts[0]}; path=${parts[1]} ;;
+    3) domain=${parts[1]}; path=${parts[2]} ;;
+  esac
+  path=${path#/}
+  echo $domain/${path//\//_}
+}
+
+function bak_get_next_image () {
+  dir="$1"
+  date="$(date +%Y%m%d)"
+  fmt="$(path_join "$dir" "$date.%03d")"
+  path=""
+  if [ -d "$dir" ]; then
+    count=$($_FIND "$dir" -maxdepth 1 -name "$date\\.\\*" | wc -l)
+    while ([ -z "$path" ] || [ -e "$path" ]); do
+      ((count++))
+      path=$(printf "$fmt" $count)
+    done
+  else
+    path=$(printf "$fmt" 1)
+  fi
+  echo "$path"
+}
+
+function bak_get_last_image () {
+  dir="$1"
+  path=""
+  if [ -d "$dir" ]; then
+    path="$($_LS -1 "$dir" | tail -1)"
+  fi
+  if [ -n "$path" ]; then
+    echo $(path_join $dir $path)
+  fi
+}
+
+function bak_get_second_to_last_image () {
+  dir="$1"
+  path=""
+  if [ -d "$dir" ]; then
+    path="$($_LS -1 "$dir" | tail -2 | head -1)"
+  fi
+  if [ -n "$path" ]; then
+    echo $(path_join $dir $path)
+  fi
+}
+
+function rsync_exit_description () {
+  local desc
+  case $1 in
+    1) desc="Syntax or usage error" ;;
+    2) desc="Protocol incompatibility" ;;
+    3) desc="Errors selecting input/output files, dirs" ;;
+    4) desc="Requested  action  not supported: an attempt was made to manipulate 64-bit files on a platform that cannot support them; or an option was specified that is supported by the client  and  not by the server." ;;
+    5) desc="Error starting client-server protocol" ;;
+    6) desc="Daemon unable to append to log-file" ;;
+    10) desc="Error in socket I/O" ;;
+    11) desc="Error in file I/O" ;;
+    12) desc="Error in rsync protocol data stream" ;;
+    13) desc="Errors with program diagnostics" ;;
+    14) desc="Error in IPC code" ;;
+    20) desc="Received SIGUSR1 or SIGINT" ;;
+    21) desc="Some error returned by waitpid()" ;;
+    22) desc="Error allocating core memory buffers" ;;
+    23) desc="Partial transfer due to error" ;;
+    24) desc="Partial transfer due to vanished source files" ;;
+    25) desc="The --max-delete limit stopped deletions" ;;
+    30) desc="Timeout in data send/receive" ;;
+    35) desc="Timeout waiting for daemon connection" ;;
+    *) desc="Unknown error"
+  esac
+  echo $desc
+}
+
+function days_to_seconds () {
+  local days seconds
+  days=$1
+  seconds=$((days * 86400))
+  echo $seconds
+}
+
+function seconds_to_dhms () {
+  local days hours minutes seconds
+  seconds=$1
+  days=$((seconds / 86400))
+  seconds=$((seconds % 86400))
+  hours=$((seconds / 3600))
+  seconds=$((seconds % 3600))
+  minutes=$((seconds / 60))
+  seconds=$((seconds % 60))
+  echo "$days day(s) $hours hour(s) $minutes minute(s) $seconds second(s)"
+}
+
+function perl_bool () {
+  local value=0
+  if ($1); then
+    value=1
+  fi
+  echo $value
+}

@@ -1,0 +1,165 @@
+#!/bin/bash
+
+# ------------------------------------------------------------------------------
+# Copyright (C) 2010 by Livesite Networks, LLC. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without 
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, 
+# this list of conditions and the following disclaimer.
+#
+# * The origin of this software must not be misrepresented; you must not 
+# claim that you wrote the original software. If you use this software in a 
+# product, an acknowledgment in the product documentation would be 
+# appreciated but is not required.
+#
+# * Altered source versions must be plainly marked as such, and must not be 
+# misrepresented as being the original software.
+#
+# * The name of the author may not be used to endorse or promote products 
+# derived from this software without specific prior written permission.
+# ------------------------------------------------------------------------------
+
+script_path=$(readlink -f $0)
+script_dir=$(dirname $script_path)
+source "$script_dir/functions"
+
+function usage () {
+  name=$(basename $0)
+  cat <<__end
+usage:
+  $name {target} {bank} [expiry-options] [options]
+where:
+  {target}                That which is to be backed up
+  {bank}                  The root of where the backups will go
+expiry-options:
+  -D|--daily              Days to keep daily backups
+  -M|--monthly            Months to keep monthly backups
+options:
+  -y|--non-interactive    Answers yes to all prompts
+  -l|--log                Append log messages to a local file
+  -v|--verbose            Increase the verbosity of informational messages
+  -r|--resume             Resume (or re-run) the last reaper
+exit:
+  0         Success
+  1         Syntax or usage error
+  256       Another reaper is running the proposed job
+__end
+}
+
+if [[ $# < 2 ]]; then
+  usage
+  exit 1
+fi
+
+src_target=$(path_normalize $1)
+shift
+
+bak_root=$(dir_absolute $1)
+if [ ! -d "$bak_root" ]; then
+  echo "Not a directory: $1"
+  exit 1
+fi
+shift
+
+opt_interactive=true
+opt_log=false
+opt_verbose=false
+opt_resume=false
+opt_daily=30
+opt_monthly=12
+
+while [[ $# -gt 0 ]]; do
+  case $1 in 
+    -D|--daily) shift; opt_daily=$1; shift;;
+    -M|--monthly) shift; opt_monthly=$1; shift;;
+    -y|--non-interactive) opt_interactive=false; shift;;
+    -l|--log) opt_log=true; shift;;
+    -v|--verbose) opt_verbose=true; shift;;
+    -r|--resume) opt_resume=true; shift;;
+    *) break;
+  esac
+done
+
+bak_subdir=$(bak_get_subdir "$src_target")
+bak_image_dir=$(path_join "$bak_root" "$bak_subdir")
+cmd_log_path="$bak_image_dir/.log"
+cmd_pid_path="$bak_image_dir/.pid-reaper"
+cmd_startup="started"
+
+if [ -e "$cmd_pid_path" ]; then
+  pid=$(cat "$cmd_pid_path")
+  ucmd=$(ps -p $pid -o ucmd=)
+  if [ -n "$ucmd" ]; then
+    say "An existing reaper is currently running:"
+    say "  pid:  $pid"
+    say "  ucmd: $ucmd"
+    say "If this is an error, remove:"
+    say "  $cmd_pid_path"
+    exit 256
+  else
+    if (! $opt_resume); then
+      say "It appears a previous reaper did not finish."
+      if ($(ask_yn "Resume?" true)); then
+        opt_resume=true
+      else
+        exit 256
+      fi
+    fi
+    rm "$cmd_pid_path"
+  fi
+fi
+
+if ($opt_resume); then
+  cmd_startup="resumed"
+fi
+
+say "Source: $src_target"
+say "Dir: $bak_image_dir"
+
+if (! $(ask_yn 'Continue?' true)); then
+  exit 0
+fi
+
+if [ ! -d "$bak_image_dir" ]; then
+  echo "Not a directory: $bak_image_dir"
+  exit 1
+fi
+
+# Process semiphore (lock)
+echo $$ > "$cmd_pid_path"
+# ------------------------------------------------------------------------------
+
+rc=0
+rc_desc=""
+
+cmd_bin="$_PERL $script_dir/dbackup-reaper-impl.pl"
+cmd_opts="$bak_image_dir"
+cmd_opts="$cmd_opts --daily $opt_daily"
+cmd_opts="$cmd_opts --monthly $opt_monthly"
+cmd_opts="$cmd_opts --verbose $(perl_bool $opt_verbose)"
+cmd_opts="$cmd_opts --interactive $(perl_bool $opt_interactive)"
+if ($opt_log); then
+  cmd_opts="$cmd_opts --log $cmd_log_path"
+fi
+
+echo "[$(date)] Reaper $cmd_startup: $bak_image_dir"
+say "Command: $cmd_bin $cmd_opts"
+nice $cmd_bin $cmd_opts
+rc=$?
+
+if [ $rc != 0 ]; then
+  rc_desc="Failure(s)"
+else
+  rc_desc="Okay"
+fi
+
+# ------------------------------------------------------------------------------
+# Unlock
+if [ $(cat "$cmd_pid_path") -eq $$ ]; then
+  rm "$cmd_pid_path"
+fi
+
+echo "[$(date)] Reaper complete: $rc_desc"
+exit $rc

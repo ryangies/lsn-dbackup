@@ -1,0 +1,207 @@
+#!/bin/bash
+
+# ------------------------------------------------------------------------------
+# Copyright (C) 2010 by Livesite Networks, LLC. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without 
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, 
+# this list of conditions and the following disclaimer.
+#
+# * The origin of this software must not be misrepresented; you must not 
+# claim that you wrote the original software. If you use this software in a 
+# product, an acknowledgment in the product documentation would be 
+# appreciated but is not required.
+#
+# * Altered source versions must be plainly marked as such, and must not be 
+# misrepresented as being the original software.
+#
+# * The name of the author may not be used to endorse or promote products 
+# derived from this software without specific prior written permission.
+# ------------------------------------------------------------------------------
+
+script_path=$(readlink -f $0)
+script_dir=$(dirname $script_path)
+source "$script_dir/functions"
+
+function usage () {
+  name=$(basename $0)
+  cat <<__end
+usage:
+  $name {target} {bank} [options] [rsync-options]
+where:
+  {target}                That which is to be backed up
+  {bank}                  The root of where the backups will go
+options:
+  -y|--non-interactive    Answers yes to all prompts
+  -l|--log                Append log messages to a local file
+  -v|--verbose            Increase the verbosity of informational messages
+  -r|--resume             Resume (or re-run) the last backup
+  --                      Stops local option processing
+rsync-options:
+  Additional options passed to $_RSYNC. These options are already enabled:
+__end
+  for opt in $_RSYNC_OPTS_STANDARD; do
+    echo "    $opt"
+  done
+  cat <<__end
+notes:
+  * thank you: http://www.mikerubel.org/computers/rsync_snapshots/
+  * rysnc-2.5.6 or later is required (as we use --link-dest)
+  * output format: {bank}/example.com/path_to_directory/20100225.001
+  * use full paths (user@example.com:/home/user/dir instead of 
+    user@example.com:dir so that the output path is unique per user.
+  * options must be separate, i.e., "-r -y", not "-ry"
+  * local directory backups use the domain name returned by hostname
+  * not all version of rsync support '--log-file' which is used for
+    the -l|--log option.  if you have this support, the log file is
+    found at: {bank}/example.com/path_to_directory/.log
+examples:
+  # Local backup
+  $name /home/my/Documents /var/backup
+  # Pull files from example.com without prompting to continue
+  $name example.com:/var/www /var/backup -y
+  # Pass an excludes list to rsync
+  $name example.com:/var/www /var/backup --exclude-from ./excludes
+exit:
+  0         Success
+  1         Syntax or usage error
+  2 - 35    See rsync
+  256       Another backup is running the proposed job
+__end
+}
+
+if [[ $# < 2 ]]; then
+  usage
+  exit 1
+fi
+
+src_target=$(path_normalize $1)
+shift
+
+bak_root=$(dir_absolute $1)
+if [ ! -d "$bak_root" ]; then
+  echo "Not a directory: $1"
+  exit 1
+fi
+shift
+
+opt_interactive=true
+opt_log=false
+opt_verbose=false
+opt_resume=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in 
+    -y|--non-interactive) opt_interactive=false; shift;;
+    -l|--log) opt_log=true; shift;;
+    -v|--verbose) opt_verbose=true; shift;;
+    -r|--resume) opt_resume=true; shift;;
+    --) shift; break;;
+    *) break;
+  esac
+done
+
+opt_rsync=$*
+bak_subdir=$(bak_get_subdir "$src_target")
+bak_image_dir=$(path_join "$bak_root" "$bak_subdir")
+bak_image_base=$(bak_get_last_image "$bak_image_dir")
+bak_image_path=$(bak_get_next_image "$bak_image_dir")
+bak_log_path="$bak_image_dir/.log"
+cmd_pid_path="$bak_image_dir/.pid"
+cmd_bin="$_RSYNC"
+cmd_opts="$_RSYNC_OPTS_STANDARD"
+cmd_startup="started"
+
+if ($opt_log); then
+  cmd_opts="$cmd_opts --log-file=$bak_log_path"
+fi
+
+if [ -e "$cmd_pid_path" ]; then
+  pid=$(cat "$cmd_pid_path")
+  ucmd=$(ps -p $pid -o ucmd=)
+  if [ -n "$ucmd" ]; then
+    say "An existing backup is currently running:"
+    say "  pid:  $pid"
+    say "  ucmd: $ucmd"
+    say "If this is an error, remove:"
+    say "  $cmd_pid_path"
+    exit 256
+  else
+    rm "$cmd_pid_path"
+    if (! $opt_resume); then
+      say "It appears a previous backup did not finish."
+      if ($(ask_yn "Resume?" true)); then
+        opt_resume=true
+      else
+        exit 256
+      fi
+    fi
+    rm "$cmd_pid_path"
+  fi
+fi
+
+if ($opt_resume); then
+  bak_image_base=$(bak_get_second_to_last_image "$bak_image_dir")
+  bak_image_path=$(bak_get_last_image "$bak_image_dir")
+  cmd_opts="$cmd_opts $_RSYNC_OPTS_RESUME"
+  cmd_startup="resumed"
+fi
+
+say "Source: $src_target"
+say "Image: $bak_image_path"
+
+if [ -n $bak_image_base ] && [ -d "$bak_image_base" ]; then
+  cmd_bin="$cmd_bin --link-dest=$bak_image_base";
+  say "Base image: $bak_image_base"
+fi
+
+if [ -n "$opt_rsync" ]; then
+  say "User options: $opt_rsync"
+fi
+
+if ($opt_verbose); then
+  say "Command: $cmd_bin $cmd_opts $opt_rsync $src_target/ $bak_image_path/"
+fi
+
+if (! $(ask_yn 'Continue?' true)); then
+  exit 0
+fi
+
+if [ ! -e "$bak_image_dir" ]; then
+  mkdir -p "$bak_image_dir"
+fi
+
+if [ ! -d "$bak_image_dir" ]; then
+  echo "Not a directory: $bak_image_dir"
+  exit 1
+fi
+
+# Lock (signals will likely be caught by rsync)
+echo $$ > "$cmd_pid_path"
+
+echo "[$(date)] Backup $cmd_startup: $bak_image_path"
+nice $cmd_bin $cmd_opts $opt_rsync "$src_target/" "$bak_image_path/"
+rc=$?
+if [ $rc != 0 ]; then
+  rc_desc="$(rsync_exit_description $rc)"
+else
+  rc_desc="Backup complete"
+fi
+
+# Unlock
+if [ $(cat "$cmd_pid_path") -eq $$ ]; then
+  rm "$cmd_pid_path"
+fi
+
+# Remove unused image directory
+count="$($_LS -1 "$bak_image_dir" | wc -l)"
+if [ $count == 0 ]; then
+  [ -e $bak_log_path ] && rm $bak_log_path
+  rmdir "$bak_image_dir"
+  rc_desc="$rc_desc (no files transferred)"
+fi
+
+echo "[$(date)] $rc_desc"
+exit $rc
