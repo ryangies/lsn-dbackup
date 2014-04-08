@@ -115,6 +115,9 @@ if ($opt_resume); then
   cmd_startup="resumed"
 fi
 
+say "======"
+say "REAPER"
+say "======"
 say "Source: $src_target"
 say "Dir: $bak_image_dir"
 

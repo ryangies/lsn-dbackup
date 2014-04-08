@@ -149,6 +149,9 @@ if ($opt_resume); then
   cmd_startup="resumed"
 fi
 
+say "======"
+say "BACKUP"
+say "======"
 say "Source: $src_target"
 say "Image: $bak_image_path"
 
