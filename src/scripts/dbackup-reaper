@@ -21,8 +21,7 @@
 # derived from this software without specific prior written permission.
 # ------------------------------------------------------------------------------
 
-script_path=$(readlink -f $0)
-script_dir=$(dirname $script_path)
+script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 source "$script_dir/functions"
 
 function usage () {
