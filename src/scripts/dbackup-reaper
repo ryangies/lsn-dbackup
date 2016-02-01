@@ -21,7 +21,7 @@
 # derived from this software without specific prior written permission.
 # ------------------------------------------------------------------------------
 
-script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "$script_dir/functions"
 
 function usage () {

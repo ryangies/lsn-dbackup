@@ -1,9 +1,9 @@
 #!/bin/bash
 
-_FIND=/usr/bin/find
-_LS=/bin/ls
-_PERL=/usr/bin/perl
-_RSYNC=/usr/bin/rsync
+_FIND=find
+_LS=ls
+_PERL=perl
+_RSYNC=rsync
 _RSYNC_OPTS_STANDARD='--archive --numeric-ids --hard-links --safe-links'
 _RSYNC_OPTS_RESUME='--delete-during --delete-excluded --ignore-existing'
 

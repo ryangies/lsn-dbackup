@@ -1,11 +1,13 @@
 # HashFile 2.1
 name => lsn-dbackup
 builder => run
-src_dir => ./src
+src_dir => src
 abstract => Disk-based Backup
-license => lgpl
+license => mit
 version => @{
   0
   0
-  18
+  19
 }
+upload_cmd => scp
+upload_path => livesite.net:/var/www/dist
